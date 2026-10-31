@@ -1,5 +1,5 @@
 
-name: CodEX AI Android APK
+name: CodEX AI - Build Android APK
 
 on:
   workflow_dispatch:
@@ -16,6 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -25,63 +29,67 @@ jobs:
         with:
           node-version: 22
 
-      - name: Setup Java
+      - name: Setup Java 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '21'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-        with:
-          cmdline-tools-version: 12266719
-          accept-android-sdk-licenses: true
-          packages: |
-            platform-tools
-            platforms;android-35
-            build-tools;35.0.0
+      - name: Configure Android SDK
+        run: |
+          echo "$ANDROID_HOME/platform-tools" >> $GITHUB_PATH
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> $GITHUB_PATH
+          echo "ANDROID_HOME=$ANDROID_HOME" >> $GITHUB_ENV
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT" >> $GITHUB_ENV
 
-      - name: Install dependencies
+      - name: Accept Android licenses
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses || true
+
+      - name: Install Android SDK packages
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Install project dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Install Capacitor
+      - name: Verify Capacitor
         run: |
-          npm install --no-save --no-audit --no-fund \
-            @capacitor/core@7 \
-            @capacitor/cli@7 \
-            @capacitor/android@7
+          npx cap --version
+          test -f capacitor.config.ts
 
       - name: Build web application
         run: npm run build
 
-      - name: Check Capacitor config
-        run: |
-          if [ ! -f capacitor.config.ts ] && \
-             [ ! -f capacitor.config.json ] && \
-             [ ! -f capacitor.config.js ]; then
-            echo "Capacitor configuration is missing"
-            exit 1
-          fi
-
-      - name: Prepare Android project
+      - name: Create Android project
         run: |
           if [ ! -d android ]; then
             npx cap add android
           fi
 
-      - name: Sync Capacitor
+      - name: Synchronize Android project
         run: npx cap sync android
 
-      - name: Build Debug APK
+      - name: Build Android APK
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
 
-      - name: Verify APK
+      - name: Verify APK exists
         run: |
-          test -f android/app/build/outputs/apk/debug/app-debug.apk
-          ls -lh android/app/build/outputs/apk/debug/app-debug.apk
+          APK="android/app/build/outputs/apk/debug/app-debug.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: APK was not generated."
+            exit 1
+          fi
+
+          echo "APK successfully generated:"
+          ls -lh "$APK"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
